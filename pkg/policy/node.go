@@ -209,6 +209,10 @@ func (n *Node) Allows(ctx *SearchContext) api.ConsumableDecision {
 		case *RuleRequires:
 			r := rule.(*RuleRequires)
 			subDecision = r.Allows(ctx)
+
+		case *RuleK8s:
+			r := rule.(*RuleK8s)
+			subDecision = r.Allows(ctx)
 		}
 
 		switch subDecision {
@@ -406,6 +410,18 @@ func (n *Node) UnmarshalJSON(data []byte) error {
 			} else {
 				n.Rules = append(n.Rules, &prL4)
 			}
+		} else if _, ok := om[privEnc[K8S]]; ok {
+			var prK8s RuleK8s
+
+			if err := json.Unmarshal(*rawMsg, &prK8s); err != nil {
+				return err
+			}
+
+			if n.HasPolicyRule(&prK8s) {
+				log.Infof("Ignoring rule %+v since it's already present in the list of rules", prK8s)
+			} else {
+				n.Rules = append(n.Rules, &prK8s)
+			}
 		} else {
 			return fmt.Errorf("unknown policy rule object: %+v", om)
 		}
@@ -515,6 +531,10 @@ func (n *Node) ResolveL4Policy(ctx *SearchContext, result *L4Policy) *L4Policy {
 		switch n.Rules[k].(type) {
 		case *RuleL4:
 			l4 := n.Rules[k].(*RuleL4)
+			l4.GetL4Policy(ctx, result)
+
+		case *RuleL4K8s:
+			l4 := n.Rules[k].(*RuleL4K8s)
 			l4.GetL4Policy(ctx, result)
 		}
 	}

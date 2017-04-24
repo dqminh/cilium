@@ -38,6 +38,7 @@ const (
 	ALWAYS_ALLOW
 	REQUIRES
 	L4
+	K8S
 )
 
 var (
@@ -46,12 +47,14 @@ var (
 		ALWAYS_ALLOW: "always-allow",
 		REQUIRES:     "requires",
 		L4:           "l4",
+		K8S:          "k8s",
 	}
 	privDec = map[string]Privilege{
 		"allow":        ALLOW,
 		"always-allow": ALWAYS_ALLOW,
 		"requires":     REQUIRES,
 		"l4":           L4,
+		"k8s":          K8S,
 	}
 )
 

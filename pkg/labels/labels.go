@@ -25,6 +25,7 @@ import (
 
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/common"
+	k8sTypes "github.com/cilium/cilium/pkg/k8s/types"
 
 	"github.com/op/go-logging"
 )
@@ -163,6 +164,11 @@ func NewLabel(key string, value string, source string) *Label {
 			source = src
 		}
 	}
+
+	var owner LabelOwner
+	if source == k8sTypes.LabelSource {
+		owner = k8sTypes.LabelOwner
+	}
 	if src == common.ReservedLabelSource && key == "" {
 		key = value
 		value = ""
@@ -172,6 +178,7 @@ func NewLabel(key string, value string, source string) *Label {
 		Key:    key,
 		Value:  value,
 		Source: source,
+		owner:  owner,
 	}
 }
 
@@ -231,8 +238,7 @@ func (l *Label) AbsoluteKey() string {
 	defer l.absKeyMU.Unlock()
 	if l.absKey == "" {
 		// Never translate using an owner if a reserved label
-		if l.owner != nil && l.Source != common.ReservedLabelSource &&
-			!strings.HasPrefix(l.Key, common.K8sPodNamespaceLabel) {
+		if l.owner != nil && l.Source != common.ReservedLabelSource {
 			l.absKey = l.owner.ResolveName(l.Key)
 		} else {
 			if !strings.HasPrefix(l.Key, "root.") {
@@ -453,10 +459,15 @@ func parseSource(str string) (src, next string) {
 func ParseLabel(str string) *Label {
 	lbl := Label{}
 	src, next := parseSource(str)
-	if src != "" {
-		lbl.Source = src
-	} else {
+
+	switch src {
+	case "":
 		lbl.Source = common.CiliumLabelSource
+	case k8sTypes.LabelSource:
+		lbl.owner = k8sTypes.LabelOwner
+		fallthrough
+	default:
+		lbl.Source = src
 	}
 
 	keySplit := strings.SplitN(next, "=", 2)

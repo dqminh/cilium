@@ -20,6 +20,7 @@ import (
 
 	"github.com/cilium/cilium/common"
 	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/policy/api"
 )
 
 type PolicyRule interface {
@@ -67,4 +68,10 @@ func (r *RuleBase) Resolve(node *Node) error {
 	}
 
 	return nil
+}
+
+type Rule interface {
+	Allows(ctx *SearchContext) api.ConsumableDecision
+	String() string
+	IsMergeable() bool
 }

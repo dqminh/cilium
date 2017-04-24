@@ -20,7 +20,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cilium/cilium/common"
+	k8sTypes "github.com/cilium/cilium/pkg/k8s/types"
 )
 
 const (
@@ -77,8 +77,8 @@ func DefaultLabelPrefixCfg() *LabelPrefixCfg {
 				Prefix: "io.cilium.",
 			},
 			{
-				Prefix: common.K8sPodNamespaceLabel,
-				Source: common.K8sLabelSource,
+				Prefix: k8sTypes.PodNamespaceLabel,
+				Source: k8sTypes.LabelSource,
 			},
 		},
 	}
@@ -86,18 +86,18 @@ func DefaultLabelPrefixCfg() *LabelPrefixCfg {
 
 // DefaultK8sLabelPrefixCfg returns a default LabelPrefixCfg using the latest
 // LPCfgFileVersion and the following label prefixes: Key: "k8s-app", Source:
-// common.K8sLabelSource and Key: "version", Source: common.K8sLabelSource.
+// k8sTypes.K8sLabelSource and Key: "version", Source: k8sTypes.K8sLabelSource.
 func DefaultK8sLabelPrefixCfg() *LabelPrefixCfg {
 	return &LabelPrefixCfg{
 		Version: LPCfgFileVersion,
 		LabelPrefixes: []*LabelPrefix{
 			{
 				Prefix: "k8s-app",
-				Source: common.K8sLabelSource,
+				Source: k8sTypes.LabelSource,
 			},
 			{
 				Prefix: "version",
-				Source: common.K8sLabelSource,
+				Source: k8sTypes.LabelSource,
 			},
 		},
 	}

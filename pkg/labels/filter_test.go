@@ -16,6 +16,7 @@ package labels
 
 import (
 	"github.com/cilium/cilium/common"
+	k8sTypes "github.com/cilium/cilium/pkg/k8s/types"
 
 	. "gopkg.in/check.v1"
 )
@@ -28,7 +29,7 @@ var _ = Suite(&LabelsPrefCfgSuite{})
 func (s *LabelsPrefCfgSuite) TestFilterLabels(c *C) {
 	wanted := Labels{
 		"id.lizards":     NewLabel("id.lizards", "web", common.CiliumLabelSource),
-		"id.lizards.k8s": NewLabel("id.lizards.k8s", "web", common.K8sLabelSource),
+		"id.lizards.k8s": NewLabel("id.lizards.k8s", "web", k8sTypes.LabelSource),
 	}
 
 	dlpcfg := DefaultLabelPrefixCfg()
@@ -46,7 +47,7 @@ func (s *LabelsPrefCfgSuite) TestFilterLabels(c *C) {
 	filtered := dlpcfg.FilterLabels(allLabels)
 	c.Assert(len(filtered), Equals, 0)
 	allLabels["id.lizards"] = NewLabel("id.lizards", "web", common.CiliumLabelSource)
-	allLabels["id.lizards.k8s"] = NewLabel("id.lizards.k8s", "web", common.K8sLabelSource)
+	allLabels["id.lizards.k8s"] = NewLabel("id.lizards.k8s", "web", k8sTypes.LabelSource)
 	filtered = dlpcfg.FilterLabels(allLabels)
 	c.Assert(len(filtered), Equals, 2)
 	c.Assert(filtered, DeepEquals, wanted)
