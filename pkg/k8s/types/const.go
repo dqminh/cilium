@@ -21,6 +21,9 @@ import (
 )
 
 const (
+	// AnnotationIsolationNS is the annotation key used in the annotation
+	// map for the network isolation on the respective namespace.
+	AnnotationIsolationNS = "net.beta.kubernetes.io/network-policy"
 	// AnnotationName is an optional annotation to the NetworkPolicy
 	// resource which specifies the name of the policy node to which all
 	// rules should be applied to.

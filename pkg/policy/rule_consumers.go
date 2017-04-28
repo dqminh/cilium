@@ -116,6 +116,39 @@ type RuleConsumers struct {
 	Allow []*AllowRule `json:"allow"`
 }
 
+// AllowReserved creates a RuleConsumers that allows to receive traffic from the
+// `res` reserved label to the given `coverage` label array.
+func AllowReserved(coverage *labels.Label, res string) PolicyRule {
+	ar := &AllowRule{
+		Action: api.ACCEPT,
+		Labels: []*labels.Label{
+			labels.NewLabel(
+				res, "", common.ReservedLabelSource,
+			),
+		},
+	}
+
+	return &RuleConsumers{
+		Coverage: []*labels.Label{coverage},
+		Allow:    []*AllowRule{ar},
+	}
+}
+
+// ReservedAllow creates a RuleConsumers that allows to receive traffic from the
+// `allow` label to the given `res` reserved label.
+func ReservedAllow(res string, allow *labels.Label) PolicyRule {
+	ar := &AllowRule{
+		Action: api.ACCEPT,
+		Labels: []*labels.Label{
+			allow,
+		},
+	}
+	return &RuleConsumers{
+		Coverage: []*labels.Label{labels.NewLabel(res, "", common.ReservedLabelSource)},
+		Allow:    []*AllowRule{ar},
+	}
+}
+
 func (prc *RuleConsumers) IsMergeable() bool {
 	for _, r := range prc.Allow {
 		if !r.IsMergeable() {

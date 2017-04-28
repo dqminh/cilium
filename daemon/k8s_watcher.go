@@ -15,6 +15,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -23,7 +24,11 @@ import (
 	"time"
 
 	"github.com/cilium/cilium/common/types"
+	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/k8s"
+	k8sConst "github.com/cilium/cilium/pkg/k8s/types"
+	"github.com/cilium/cilium/pkg/labels"
+	"github.com/cilium/cilium/pkg/policy"
 
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -74,13 +79,27 @@ func k8sErrorHandler(e error) {
 	log.Error(e)
 }
 
-// EnableK8sWatcher watches for policy, services and endpoint changes on the kurbenetes
-// api server defined in the receiver's daemon k8sClient. Re-syncs all state from the
-// kubernetes api server at the given reSyncPeriod duration.
+// EnableK8sWatcher watches for namespaces, policy, services, endpoint and
+// ingress changes on the kurbenetes api server defined in the receiver's daemon
+// k8sClient. Re-syncs all state from the kubernetes api server at the given
+// reSyncPeriod duration.
 func (d *Daemon) EnableK8sWatcher(reSyncPeriod time.Duration) error {
 	if !d.conf.IsK8sEnabled() {
 		return nil
 	}
+
+	_, namespaceController := cache.NewInformer(
+		cache.NewListWatchFromClient(d.k8sClient.Core().RESTClient(),
+			"namespaces", v1.NamespaceAll, fields.Everything()),
+		&v1.Namespace{},
+		reSyncPeriod,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc:    d.namespaceAddFn,
+			UpdateFunc: d.namespaceModFn,
+			DeleteFunc: d.namespaceDelFn,
+		},
+	)
+	go namespaceController.Run(wait.NeverStop)
 
 	_, policyController := cache.NewInformer(
 		cache.NewListWatchFromClient(d.k8sClient.Extensions().RESTClient(),
@@ -137,6 +156,124 @@ func (d *Daemon) EnableK8sWatcher(reSyncPeriod time.Duration) error {
 	return nil
 }
 
+func isAnnotationSetTo(annotations map[string]string, value k8s.IngressIsolationPolicy) bool {
+	if value == "" {
+		return false
+	}
+	annoStr := annotations[k8sConst.AnnotationIsolationNS]
+	ing := k8s.NamespaceNetworkPolicy{}
+	if err := json.Unmarshal([]byte(annoStr), &ing); err != nil {
+		return false
+	}
+	return ing.Ingress != nil &&
+		ing.Ingress.Isolation != nil &&
+		*ing.Ingress.Isolation == value
+}
+
+func (d *Daemon) k8sNSPolicySwap(ns string, defaultDeny bool) {
+	var oldRes, newRes string
+	if defaultDeny {
+		oldRes = labels.IDNameAll
+		newRes = labels.IDNameHost
+	} else {
+		oldRes = labels.IDNameHost
+		newRes = labels.IDNameAll
+	}
+
+	// The policy will be in the form of, for example:
+	// coverage: k8s:io.kubernetes.pod.namespace=`ns`, allow: `newRes`
+	parent, name := policy.SplitNodePath(k8sConst.PodNamespaceLabelPrefix)
+	grandParent, parentName := policy.SplitNodePath(parent)
+	nsLabel := labels.NewLabel(name, ns, k8sConst.LabelSource)
+
+	// Old rules to subtract from the policy tree
+	nodeToSub := policy.NewNode(parentName, nil)
+	nodeToSub.Rules = append(nodeToSub.Rules, policy.AllowReserved(nsLabel, oldRes))
+
+	// New rules to add to the policy tree
+	nodeToAdd := policy.NewNode(parentName, nil)
+	nodeToAdd.Rules = append(nodeToAdd.Rules, policy.AllowReserved(nsLabel, newRes))
+
+	if err := d.PolicyAtomicReplace(grandParent, nodeToSub, grandParent, nodeToAdd); err != nil {
+		log.Errorf("Unable to replace k8s policy: %s", err)
+	}
+
+	// Since k8s network policies don't have egress rules, the policy will
+	// always be in the form of:
+	// coverage: reserved:world, allow: k8s:io.kubernetes.pod.namespace=`ns`
+	// coverage: reserved:host, allow: k8s:io.kubernetes.pod.namespace=`ns`
+	rootToSub := policy.NewNode("", nil)
+	rootToAdd := policy.NewNode("", nil)
+
+	nsAllowLabel := labels.NewLabel(k8sConst.PodNamespaceLabelPrefix, ns, k8sConst.LabelSource)
+	rootToSub.Rules = append(rootToSub.Rules, policy.ReservedAllow(oldRes, nsAllowLabel))
+	rootToAdd.Rules = append(rootToAdd.Rules, policy.ReservedAllow(newRes, nsAllowLabel))
+
+	pra := policy.ReservedAllow(labels.IDNameWorld, nsAllowLabel)
+	if defaultDeny {
+		rootToAdd.Rules = append(rootToAdd.Rules, pra)
+	} else {
+		rootToSub.Rules = append(rootToSub.Rules, pra)
+	}
+
+	if err := d.PolicyAtomicReplace(policy.RootNodeName, rootToSub, policy.RootNodeName, rootToAdd); err != nil {
+		log.Errorf("Unable to replace k8s policy: %s", err)
+	}
+}
+
+func (d *Daemon) namespaceAddFn(obj interface{}) {
+	ns, ok := obj.(*v1.Namespace)
+	if !ok {
+		return
+	}
+
+	var wg sync.WaitGroup
+	d.endpointsMU.RLock()
+	wg.Add(len(d.endpoints))
+	for i := range d.endpoints {
+		go func(wg *sync.WaitGroup, ep *endpoint.Endpoint) {
+			id := ""
+			lblsToDel := labels.Labels{}
+			ep.Mutex.RLock()
+			if v, ok := ep.SecLabel.Labels[k8sConst.PodNamespaceLabelPrefix]; ok && v.Value == ns.Name {
+				for k, v := range ep.SecLabel.Labels {
+					if strings.HasPrefix(k, k8sConst.PodNamespaceMetaLabelsPrefix) {
+						lblsToDel[k] = v.DeepCopy()
+					}
+				}
+				_, id, _ = endpoint.ValidateID(ep.StringIDLocked())
+			}
+			ep.Mutex.RUnlock()
+
+			lblsToAdd := map[string]string{}
+			for k, v := range ns.Labels {
+				lblsToAdd[policy.JoinPath(k8sConst.PodNamespaceMetaLabelsPrefix, k)] = v
+			}
+			newNSLabels := labels.Map2Labels(lblsToAdd, k8sConst.LabelSource)
+			err := d.UpdateSecLabels(id, newNSLabels, lblsToDel)
+			if err != nil {
+				log.Errorf("Error while adding namespace policy to endpoint %s: %s", id, err)
+			}
+			wg.Done()
+		}(&wg, d.endpoints[i])
+	}
+	d.endpointsMU.RUnlock()
+	wg.Wait()
+	d.k8sNSPolicySwap(ns.Name, isAnnotationSetTo(ns.Annotations, k8s.DefaultDeny))
+}
+
+func (d *Daemon) namespaceModFn(oldObj interface{}, newObj interface{}) {
+	d.namespaceAddFn(newObj)
+}
+
+func (d *Daemon) namespaceDelFn(obj interface{}) {
+	ns, ok := obj.(*v1.Namespace)
+	if !ok {
+		return
+	}
+	d.k8sNSPolicySwap(ns.Name, false)
+}
+
 func (d *Daemon) addK8sNetworkPolicy(obj interface{}) {
 	k8sNP, ok := obj.(*v1beta1.NetworkPolicy)
 	if !ok {
@@ -156,7 +293,7 @@ func (d *Daemon) addK8sNetworkPolicy(obj interface{}) {
 
 	// Ensure that the k8s policy node has the IgnoreNameCoverage flag set
 	// All policy evaluations must enter this node
-	if parentsPath == k8s.DefaultPolicyParentPath {
+	if parentsPath == k8sConst.DefaultPolicyParentPath {
 		d.policy.Mutex.Lock()
 		defer d.policy.Mutex.Unlock()
 

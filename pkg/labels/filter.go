@@ -77,7 +77,11 @@ func DefaultLabelPrefixCfg() *LabelPrefixCfg {
 				Prefix: "io.cilium.",
 			},
 			{
-				Prefix: k8sTypes.PodNamespaceLabel,
+				Prefix: k8sTypes.PodNamespaceLabelPrefix,
+				Source: k8sTypes.LabelSource,
+			},
+			{
+				Prefix: k8sTypes.PodNamespaceMetaLabelsPrefix,
 				Source: k8sTypes.LabelSource,
 			},
 		},
