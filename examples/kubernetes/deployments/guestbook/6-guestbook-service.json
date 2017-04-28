@@ -3,6 +3,7 @@
     "apiVersion":"v1",
     "metadata":{
         "name":"guestbook",
+        "namespace": "cilium-example",
         "labels":{
             "k8s-app.guestbook":"web"
         }
