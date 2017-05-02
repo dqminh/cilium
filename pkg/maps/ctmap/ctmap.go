@@ -31,6 +31,92 @@ type CtMap struct {
 	Type CtType
 }
 
+// ServiceKey is the interface describing protocol independent key for services map.
+type ServiceKey interface {
+	bpf.MapKey
+
+	// Returns human readable string representation
+	String() string
+
+	// Returns true if the key is of type IPv6
+	IsIPv6() bool
+
+	// Returns the BPF map matching the key type
+	Map() *bpf.Map
+
+	// Returns the BPF Weighted Round Robin map matching the key type
+	//RRMap() *bpf.Map
+
+	// Returns a RevNatValue matching a ServiceKey
+	//RevNatValue() RevNatValue
+
+	// Returns the source port set in the key or 0
+	GetSrcPort() uint16
+
+	// Returns the destination port set in the key or 0
+	GetDstPort() uint16
+
+	// Returns the next header
+	GetNextHdr() u8proto.U8proto
+
+	// Returns the flags
+	GetFlags() uint8
+
+
+	// Set the backend index (master: 0, backend: nth backend)
+	//SetBackend(int)
+
+	// Return backend index
+	//GetBackend() int
+
+	// Convert between host byte order and map byte order
+	Convert() ServiceKey
+}
+
+// ServiceValue is the interface describing protocol independent value for services map.
+type ServiceValue interface {
+	bpf.MapValue
+
+	// Returns human readable string representation
+	String() string
+
+	// Returns a RevNatKey matching a ServiceValue
+	//RevNatKey() RevNatKey
+
+	// Set the number of backends
+	//SetCount(int)
+
+	// Get the number of backends
+	//GetCount() int
+
+	// Set address to map to (left blank for master)
+	//SetAddress(net.IP) error
+
+	// Set source port to map to (left blank for master)
+	SetSrcPort(uint16)
+
+	//Set destination port to map to (left blank for master)
+	SetDstPort(uint16)
+
+	// Sets the next header
+	SetNextHdr(u8proto.U8proto)
+
+	// Sets the flags
+	SetFlags(uint8)
+
+	// Set reverse NAT identifier
+	//SetRevNat(int)
+
+	// Set Weight
+	//SetWeight(uint16)
+
+	// Get Weight
+	//GetWeight() uint16
+
+	// Convert between host byte order and map byte order
+	Convert() ServiceValue
+}
+
 const (
 	MapName6 = "cilium_ct6_"
 	MapName4 = "cilium_ct4_"
@@ -40,23 +126,8 @@ const (
 	TUPLE_F_RELATED = 2
 )
 
-type CtType int
-
-const (
-	CtTypeIPv6 CtType = iota
-	CtTypeIPv4
-)
-
 type CtKey interface {
 	Dump(buffer *bytes.Buffer) bool
-}
-
-type CtKey6 struct {
-	addr    types.IPv6
-	sport   uint16
-	dport   uint16
-	nexthdr u8proto.U8proto
-	flags   uint8
 }
 
 func (key CtKey6) Dump(buffer *bytes.Buffer) bool {
@@ -85,14 +156,6 @@ func (key CtKey6) Dump(buffer *bytes.Buffer) bool {
 	}
 
 	return true
-}
-
-type CtKey4 struct {
-	addr    types.IPv4
-	sport   uint16
-	dport   uint16
-	nexthdr u8proto.U8proto
-	flags   uint8
 }
 
 func (key CtKey4) Dump(buffer *bytes.Buffer) bool {
