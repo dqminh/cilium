@@ -30,28 +30,32 @@ const (
 	GcInterval int = 10
 )
 
-func runGC(e *endpoint.Endpoint, name string, ctType ctmap.CtType) {
-	file := bpf.MapPath(name + strconv.Itoa(int(e.ID)))
-	fd, err := bpf.ObjGet(file)
+func runGC(e *endpoint.Endpoint, name string) {
+	// Get path of map that is tied to this endpoint ID
+	//file := bpf.MapPath(name + strconv.Itoa(int(e.ID)))
+	//fd, err := bpf.ObjGet(file)
+	//if err != nil {
+	//	log.Warningf("Unable to open CT map %s: %s\n", file, err)
+	//	e.LogStatus(endpoint.BPF, endpoint.Warning, fmt.Sprintf("Unable to open CT map %s: %s", file, err))
+	//	return
+	//}
+
+	//f := os.NewFile(uintptr(fd), file)
+	//defer f.Close()
+
+	//info, err := bpf.GetMapInfo(os.Getpid(), fd)
+	//if err != nil {
+	//	log.Warningf("Unable to open CT map's fdinfo %s: %s\n", file, err)
+	//}
+
+	//if info.MapType == bpf.MapTypeLRUHash {
+	//	return
+	//}
+
+	m, err := bpf.OpenMap(name)
 	if err != nil {
-		log.Warningf("Unable to open CT map %s: %s\n", file, err)
-		e.LogStatus(endpoint.BPF, endpoint.Warning, fmt.Sprintf("Unable to open CT map %s: %s", file, err))
-		return
+		log.Warningf("Unable to open map %s: %s", name, err)
 	}
-
-	f := os.NewFile(uintptr(fd), file)
-	defer f.Close()
-
-	info, err := bpf.GetMapInfo(os.Getpid(), fd)
-	if err != nil {
-		log.Warningf("Unable to open CT map's fdinfo %s: %s\n", file, err)
-	}
-
-	if info.MapType == bpf.MapTypeLRUHash {
-		return
-	}
-
-	m := ctmap.CtMap{Fd: fd, Type: ctType}
 
 	deleted := m.GC(uint16(GcInterval))
 	if deleted > 0 {
@@ -77,9 +81,9 @@ func (d *Daemon) EnableConntrackGC() {
 				e.Mutex.RUnlock()
 				// We can unlock the endpoint mutex sense
 				// in runGC it will be locked as needed.
-				runGC(e, ctmap.MapName6, ctmap.CtTypeIPv6)
+				runGC(ctmap.MapName6)
 				if !d.conf.IPv4Disabled {
-					runGC(e, ctmap.MapName4, ctmap.CtTypeIPv4)
+					runGC(ctmap.MapName4)
 				}
 			}
 

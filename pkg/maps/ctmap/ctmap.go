@@ -25,11 +25,22 @@ import (
 	"github.com/cilium/cilium/pkg/u8proto"
 )
 
-type CtMap struct {
-	path string
-	Fd   int
-	Type CtType
-}
+type CtType int
+
+const (
+       CtTypeIPv6 CtType = iota
+       CtTypeIPv4
+)
+
+const (
+	MapName6 = "cilium_ct6_"
+	MapName4 = "cilium_ct4_"
+	// Maximum number of entries in each hashtable
+	maxEntries   = 65536
+	TUPLE_F_OUT     = 0
+	TUPLE_F_IN      = 1
+	TUPLE_F_RELATED = 2
+)
 
 // ServiceKey is the interface describing protocol independent key for services map.
 type ServiceKey interface {
@@ -44,17 +55,20 @@ type ServiceKey interface {
 	// Returns the BPF map matching the key type
 	Map() *bpf.Map
 
-	// Returns the BPF Weighted Round Robin map matching the key type
-	//RRMap() *bpf.Map
-
 	// Returns a RevNatValue matching a ServiceKey
-	//RevNatValue() RevNatValue
+	RevNatValue() uint16
 
 	// Returns the source port set in the key or 0
 	GetSrcPort() uint16
 
+	// Set source port to map to (left blank for master)
+	SetSrcPort(uint16)
+
 	// Returns the destination port set in the key or 0
 	GetDstPort() uint16
+
+	//Set destination port to map to (left blank for master)
+	SetDstPort(uint16)
 
 	// Returns the next header
 	GetNextHdr() u8proto.U8proto
@@ -62,12 +76,8 @@ type ServiceKey interface {
 	// Returns the flags
 	GetFlags() uint8
 
-
-	// Set the backend index (master: 0, backend: nth backend)
-	//SetBackend(int)
-
-	// Return backend index
-	//GetBackend() int
+	// Sets the flags
+	SetFlags(uint8)
 
 	// Convert between host byte order and map byte order
 	Convert() ServiceKey
@@ -80,17 +90,8 @@ type ServiceValue interface {
 	// Returns human readable string representation
 	String() string
 
-	// Returns a RevNatKey matching a ServiceValue
-	//RevNatKey() RevNatKey
-
-	// Set the number of backends
-	//SetCount(int)
-
-	// Get the number of backends
-	//GetCount() int
-
-	// Set address to map to (left blank for master)
-	//SetAddress(net.IP) error
+	// Returns the  matching a ServiceValue
+	RevNatKey() uint16
 
 	// Set source port to map to (left blank for master)
 	SetSrcPort(uint16)
@@ -104,88 +105,11 @@ type ServiceValue interface {
 	// Sets the flags
 	SetFlags(uint8)
 
-	// Set reverse NAT identifier
-	//SetRevNat(int)
-
-	// Set Weight
-	//SetWeight(uint16)
-
-	// Get Weight
-	//GetWeight() uint16
-
 	// Convert between host byte order and map byte order
 	Convert() ServiceValue
 }
 
-const (
-	MapName6 = "cilium_ct6_"
-	MapName4 = "cilium_ct4_"
-
-	TUPLE_F_OUT     = 0
-	TUPLE_F_IN      = 1
-	TUPLE_F_RELATED = 2
-)
-
-type CtKey interface {
-	Dump(buffer *bytes.Buffer) bool
-}
-
-func (key CtKey6) Dump(buffer *bytes.Buffer) bool {
-	if key.nexthdr == 0 {
-		return false
-	}
-
-	if key.flags&TUPLE_F_IN != 0 {
-		buffer.WriteString(fmt.Sprintf("%s IN %s %d:%d ",
-			key.nexthdr.String(),
-			key.addr.IP().String(),
-			key.sport, key.dport),
-		)
-
-	} else {
-		buffer.WriteString(fmt.Sprintf("%s OUT %s %d:%d ",
-			key.nexthdr.String(),
-			key.addr.IP().String(),
-			key.dport,
-			key.sport),
-		)
-	}
-
-	if key.flags&TUPLE_F_RELATED != 0 {
-		buffer.WriteString("related ")
-	}
-
-	return true
-}
-
-func (key CtKey4) Dump(buffer *bytes.Buffer) bool {
-	if key.nexthdr == 0 {
-		return false
-	}
-
-	if key.flags&TUPLE_F_IN != 0 {
-		buffer.WriteString(fmt.Sprintf("%s IN %s %d:%d ",
-			key.nexthdr.String(),
-			key.addr.IP().String(),
-			key.sport, key.dport),
-		)
-
-	} else {
-		buffer.WriteString(fmt.Sprintf("%s OUT %s %d:%d ",
-			key.nexthdr.String(),
-			key.addr.IP().String(),
-			key.dport,
-			key.sport),
-		)
-	}
-
-	if key.flags&TUPLE_F_RELATED != 0 {
-		buffer.WriteString("related ")
-	}
-
-	return true
-}
-
+// CtEntry represents an entry in the connection tracking table.
 type CtEntry struct {
 	rx_packets uint64
 	rx_bytes   uint64
@@ -195,6 +119,10 @@ type CtEntry struct {
 	flags      uint16
 	revnat     uint16
 	proxy_port uint16
+}
+
+type CtKey interface {
+	Dump(buffer *bytes.Buffer) bool
 }
 
 type CtEntryDump struct {
@@ -247,11 +175,12 @@ func (m *CtMap) DumpToSlice() ([]CtEntryDump, error) {
 				break
 			}
 
-			err = bpf.LookupElement(
-				m.Fd,
-				unsafe.Pointer(&nextKey),
-				unsafe.Pointer(&entry),
-			)
+			entry, err = key.Map().Lookup(key.Convert())
+			//err = bpf.LookupElement(
+			//	m.Fd,
+			//	unsafe.Pointer(&nextKey),
+			//	unsafe.Pointer(&entry),
+			//)
 			if err != nil {
 				return nil, err
 			}
@@ -289,25 +218,32 @@ func (m *CtMap) DumpToSlice() ([]CtEntryDump, error) {
 	return entries, nil
 }
 
-func (m *CtMap) doGc(interval uint16, key unsafe.Pointer, nextKey unsafe.Pointer, deleted *int) bool {
+func (m *CtMap) doGc(interval uint16, key ServiceKey, nextKey unsafe.Pointer, deleted *int) bool {
 	var entry CtEntry
 
+	// Should this be converted into a function in pkg/bpf/map.go using mutex?
 	err := bpf.GetNextKey(m.Fd, key, nextKey)
 	if err != nil {
 		return false
 	}
 
-	err = bpf.LookupElement(m.Fd, nextKey, unsafe.Pointer(&entry))
+	_, err = key.Map().Lookup(key.Convert())
+	//err = bpf.LookupElement(m.Fd, nextKey, unsafe.Pointer(&entry))
 	if err != nil {
 		return false
 	}
 
 	if entry.lifetime <= interval {
-		bpf.DeleteElement(m.Fd, nextKey)
+		//Should we capture the error here?
+		key.Map().Delete(key.Convert())
+		//bpf.DeleteElement(m.Fd, nextKey)
 		(*deleted)++
 	} else {
 		entry.lifetime -= interval
-		bpf.UpdateElement(m.Fd, nextKey, unsafe.Pointer(&entry), 0)
+		//Second parameter seems iffy - look this up...
+		// No consumption of error either - why?
+		key.Map().Update(key.Convert(), entry.Convert())
+		//bpf.UpdateElement(m.Fd, nextKey, unsafe.Pointer(&entry), 0)
 	}
 
 	return true

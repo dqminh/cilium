@@ -29,8 +29,8 @@ var bpfCtListCmd = &cobra.Command{
 	Short:  "List connection tracking entries",
 	PreRun: requireEndpointID,
 	Run: func(cmd *cobra.Command, args []string) {
-		dumpCtProto(ctmap.MapName6+args[0], ctmap.CtTypeIPv6)
-		dumpCtProto(ctmap.MapName4+args[0], ctmap.CtTypeIPv4)
+		dumpCtProto(ctmap.MapName6+args[0])
+		dumpCtProto(ctmap.MapName4+args[0])
 	},
 }
 
@@ -38,15 +38,10 @@ func init() {
 	bpfCtCmd.AddCommand(bpfCtListCmd)
 }
 
-func dumpCtProto(name string, ctType ctmap.CtType) {
-	file := bpf.MapPath(name)
+func dumpCtProto(name string) {
 
-	fd, err := bpf.ObjGet(file)
-	if err != nil {
-		Fatalf("Unable to open %s: %s\n", file, err)
-	}
-
-	m := ctmap.CtMap{Fd: fd, Type: ctType}
+	m, err := bpf.OpenMap(name)
+	// TODO: fix dump :)
 	out, err := m.Dump()
 	if err != nil {
 		Fatalf("Error while dumping BPF Map: %s\n", err)
