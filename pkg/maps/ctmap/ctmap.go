@@ -56,25 +56,28 @@ type ServiceKey interface {
 	Map() *bpf.Map
 
 	// Returns a RevNatValue matching a ServiceKey
-	RevNatValue() uint16
+	//RevNatValue() uint16
 
 	// Returns the source port set in the key or 0
-	GetSrcPort() uint16
+	//GetSrcPort() uint16
 
 	// Set source port to map to (left blank for master)
 	SetSrcPort(uint16)
 
 	// Returns the destination port set in the key or 0
-	GetDstPort() uint16
+	//GetDstPort() uint16
 
 	//Set destination port to map to (left blank for master)
 	SetDstPort(uint16)
 
 	// Returns the next header
-	GetNextHdr() u8proto.U8proto
+	//GetNextHdr() u8proto.U8proto
+
+	SetNextHdr(u8proto.U8proto)
+
 
 	// Returns the flags
-	GetFlags() uint8
+	//GetFlags() uint8
 
 	// Sets the flags
 	SetFlags(uint8)
@@ -119,6 +122,15 @@ type CtEntry struct {
 	flags      uint16
 	revnat     uint16
 	proxy_port uint16
+}
+
+func (s *CtEntry) Convert() ServiceValue {
+	//TODO: figure out if need to run Swab16 here
+	n := *s
+	//n.RevNat = common.Swab16(n.RevNat)
+	//n.Port = common.Swab16(n.Port)
+	//n.Weight = common.Swab16(n.Weight)
+	return &n
 }
 
 type CtKey interface {
