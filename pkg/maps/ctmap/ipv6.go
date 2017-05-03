@@ -83,6 +83,7 @@ func Service6DumpParser(key []byte, value []byte) (bpf.MapKey, bpf.MapValue, err
 	return svcKey.Convert(), svcVal.Convert(), nil
 }
 
+/*
 // TODO: get rid of this and implement dump according to the Map interface.
 // TODO: what is this doing??
 func (key CtKey6) Dump(buffer *bytes.Buffer) bool {
@@ -111,4 +112,4 @@ func (key CtKey6) Dump(buffer *bytes.Buffer) bool {
 	}
 
 	return true
-}
+}*/

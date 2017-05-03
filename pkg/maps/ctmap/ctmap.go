@@ -142,11 +142,7 @@ type CtEntryDump struct {
 	Value CtEntry
 }
 
-func (m *CtMap) String() string {
-	return m.path
-}
-
-func (m *CtMap) Dump() (string, error) {
+/*func (m *CtMap) Dump() (string, error) {
 	var buffer bytes.Buffer
 	entries, err := m.DumpToSlice()
 	if err != nil {
@@ -228,18 +224,18 @@ func (m *CtMap) DumpToSlice() ([]CtEntryDump, error) {
 	}
 
 	return entries, nil
-}
+}*/
 
 func (m *CtMap) doGc(interval uint16, key ServiceKey, nextKey unsafe.Pointer, deleted *int) bool {
 	var entry CtEntry
 
-	// Should this be converted into a function in pkg/bpf/map.go using mutex?
+	//TODO:  Should this be converted into a function in pkg/bpf/map.go using mutex?
 	err := bpf.GetNextKey(m.Fd, key, nextKey)
 	if err != nil {
 		return false
 	}
 
-	_, err = key.Map().Lookup(key.Convert())
+	entry , err = key.Map().Lookup(key.Convert())
 	//err = bpf.LookupElement(m.Fd, nextKey, unsafe.Pointer(&entry))
 	if err != nil {
 		return false
@@ -248,7 +244,7 @@ func (m *CtMap) doGc(interval uint16, key ServiceKey, nextKey unsafe.Pointer, de
 	if entry.lifetime <= interval {
 		//Should we capture the error here?
 		key.Map().Delete(key.Convert())
-		//bpf.DeleteElement(m.Fd, nextKey)
+		bpf.DeleteElement(m.Fd, nextKey)
 		(*deleted)++
 	} else {
 		entry.lifetime -= interval
